@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat App</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            background-color: #e6f2ff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #chatWrapper {
+            width: 95%;
+            max-width: 900px;
+            height: 80vh;
+            display: flex;
+            flex-direction: row;
+            background: #ffffff;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+
+        #userList {
+            width: 25%;
+            border-right: 1px solid #ccc;
+            background: #f0f8ff;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            overflow-y: auto;
+        }
+
+        #userList h3 {
+            margin-top: 0;
+            color: #0077b6;
+        }
+
+        #chatContainer {
+            width: 75%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #header {
+            background-color: #0077b6;
+            color: #fff;
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        #header i {
+            margin-right: 10px;
+            color: #ffdd00;
+        }
+
+        #messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            background: #f9f9f9;
+        }
+
+        .message {
+            max-width: 70%;
+            padding: 10px 15px;
+            margin: 5px 0;
+            border-radius: 20px;
+            word-wrap: break-word;
+        }
+
+        .self {
+            background-color: #90ee90;
+            align-self: flex-end;
+            border-bottom-right-radius: 0;
+        }
+
+        .other {
+            background-color: #f1f1f1;
+            align-self: flex-start;
+            border-bottom-left-radius: 0;
+        }
+
+        .timestamp {
+            font-size: 10px;
+            color: gray;
+            margin-top: 5px;
+            text-align: right;
+        }
+
+        #typingIndicator {
+            font-size: 12px;
+            color: gray;
+            margin-left: 10px;
+            height: 20px;
+        }
+
+        #inputContainer {
+            display: flex;
+            border-top: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+
+        #username, #message {
+            padding: 12px;
+            border: none;
+            outline: none;
+            font-size: 14px;
+        }
+
+        #username {
+            width: 30%;
+            border-right: 1px solid #ccc;
+        }
+
+        #message {
+            flex: 1;
+        }
+
+        #sendBtn {
+            padding: 12px 20px;
+            background-color: #0077b6;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #sendBtn:hover {
+            background-color: #005f87;
+        }
+
+        @media(max-width: 768px){
+            #chatWrapper {
+                flex-direction: column;
+                height: 90vh;
+            }
+            #userList {
+                width: 100%;
+                height: 100px;
+                flex-direction: row;
+                overflow-x: auto;
+                border-right: none;
+                border-bottom: 1px solid #ccc;
+            }
+            #chatContainer {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="chatWrapper">
+        <div id="userList">
+            <h3>Users</h3>
+            <ul id="users"></ul>
+        </div>
+        <div id="chatContainer">
+            <div id="header"><i class="fas fa-comments"></i> Chat Room</div>
+            <ul id="messages"></ul>
+            <div id="typingIndicator"></div>
+            <div id="inputContainer">
+                <input id="username" placeholder="Your Name" />
+                <input id="message" placeholder="Type a message..." />
+                <button id="sendBtn" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let stompClient = null;
+        const messagesList = document.getElementById("messages");
+        const usersList = document.getElementById("users");
+        const usernameInput = document.getElementById("username");
+        const messageInput = document.getElementById("message");
+        const typingIndicator = document.getElementById("typingIndicator");
+        let typingTimeout;
+
+        function connect() {
+            const socket = new SockJS('/chat-websocket');
+            stompClient = Stomp.over(socket);
+            stompClient.connect({}, function(frame) {
+                stompClient.subscribe('/topic/messages', function(messageOutput) {
+                    const messages = JSON.parse(messageOutput.body);
+                    messagesList.innerHTML = "";
+                    messages.forEach(msg => {
+                        const li = document.createElement("li");
+                        li.className = 'message ' + (msg.username === usernameInput.value ? 'self' : 'other');
+                        li.innerHTML = `<div>${msg.content}</div>
+                                        <div class="timestamp">${msg.username} • ${new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>`;
+                        messagesList.appendChild(li);
+                    });
+                    messagesList.scrollTop = messagesList.scrollHeight;
+                });
+
+                stompClient.subscribe('/topic/users', function(userOutput){
+                    const users = JSON.parse(userOutput.body);
+                    usersList.innerHTML = "";
+                    users.forEach(u => {
+                        const li = document.createElement("li");
+                        li.textContent = u;
+                        usersList.appendChild(li);
+                    });
+                });
+
+                stompClient.subscribe('/topic/typing', function(typingMsg){
+                    const data = JSON.parse(typingMsg.body);
+                    if(data.username !== usernameInput.value){
+                        typingIndicator.textContent = data.username + " is typing...";
+                        clearTimeout(typingTimeout);
+                        typingTimeout = setTimeout(()=>{ typingIndicator.textContent = ""; }, 2000);
+                    }
+                });
+            });
+        }
+
+        function sendMessage() {
+            const username = usernameInput.value.trim();
+            const content = messageInput.value.trim();
+            if(username && content) {
+                stompClient.send("/app/send", {}, JSON.stringify({username: username, content: content}));
+                messageInput.value = "";
+            }
+        }
+
+        messageInput.addEventListener("keypress", function(e){
+            stompClient.send("/app/typing", {}, JSON.stringify({username: usernameInput.value}));
+            if(e.key === "Enter") sendMessage();
+        });
+
+        connect();
+    </script>
+</body>
+</html>
